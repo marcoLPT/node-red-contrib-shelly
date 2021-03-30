@@ -264,6 +264,94 @@ module.exports = function (RED) {
 
 
     // --------------------------------------------------------------------------------------------
+    // --------------------------------------------------------------------------------------------
+    // The HT node controls a shelly HT device.
+    /* The device can diconnect but wakes up when the HT pool changes the temperature change trigger,
+    GET /status
+    {
+        GET /status
+
+{
+    "is_valid": true,
+    "tmp": {        "value": 22,        "units": "C",        "tC": 22,        "tF": 71.6,        "is_valid": true    },
+    "hum": {        "value": 57,        "is_valid": true    },
+    "bat": {        "value": 71,        "voltage": 2.73    },
+    "act_reasons": [        "button"    ],    "connect_retries": 0
+}
+    }
+    */
+    function ShellyHTNode(config) {
+        RED.nodes.createNode(this, config);
+        var node = this;
+        node.hostname = config.hostname;
+        node.sendRawStatus = config.sendfullstatus;
+        node.usePolling = config.usepolling;
+        node.pollInterval = parseInt(config.pollinginterval);
+
+        if(node.usePolling){
+            node.timer = setInterval(function() {
+                node.emit("input", {});
+            }, node.pollInterval);
+
+            node.status({ fill: "yellow", shape: "ring", text: "Status unknown: polling ..." });
+        }
+        else{
+            node.status({ fill: "yellow", shape: "ring", text: "Status unknown: waiting for trigger ..." });
+        }
+
+        this.on('input', function (msg) {
+
+                if(msg.payload){
+                    node.status({ fill: "green", shape: "dot", text: "Status unknown: updating ..." });
+                }
+
+                shellyTryGet('/status', node, node.pollInterval, function(result) {
+                    var status = JSON.parse(result);
+                    var timestamp=new Date().toLocaleTimeString();
+                    if(status.sensor.is_valid){
+                        node.status({ fill: "green", shape: "ring", text: "Status: " + status.sensor.state + " " + timestamp});
+                    }
+                    else {
+                        node.status({ fill: "red", shape: "ring", text: "Status: invalid" });
+                    }
+
+                    var payload;
+                    if(!node.sendRawStatus){
+                        payload = {
+                            tmp : status.tmp,
+                            hum : status.hum,
+                            bat :  status.bat,
+                        }
+                    }
+                    else{
+                        payload = status;
+                    }
+
+                    msg.payload = payload;
+                    node.send([msg]);
+                },
+                function(error){
+                    if(msg.payload){
+                        node.status({ fill: "yellow", shape: "ring", text: "Status unknown: device not reachable." });
+                    }
+                });
+        });
+
+        this.on('close', function(done) {
+            clearInterval(node.timer);
+            done();
+        });
+    }
+
+    RED.nodes.registerType("shelly-HT", ShellyHTNode, {
+        credentials: {
+            username: { type: "text" },
+            password: { type: "password" },
+        }
+    });
+
+
+    // --------------------------------------------------------------------------------------------
     // The roller shutter node controls a shelly roller shutter (2.5).
     function ShellyRollerShutterNode(config) {
         RED.nodes.createNode(this, config);
